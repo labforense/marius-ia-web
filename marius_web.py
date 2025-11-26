@@ -2,6 +2,7 @@ import streamlit as st
 import google.generativeai as genai
 from PIL import Image
 
+NOME = "Marius Web"
 # --- CONFIGURAÇÃO SEGURA (MUDANÇA AQUI) ---
 # O Streamlit vai buscar a chave nos "Secrets" do servidor, não no código.
 try:
@@ -65,4 +66,5 @@ if prompt:
         st.chat_message("model", avatar="🤖").write(texto_resp)
         
     except Exception as e:
+
         st.error(f"Erro: {e}")
