@@ -3,11 +3,35 @@ import google.generativeai as genai
 from PIL import Image
 import PyPDF2
 from duckduckgo_search import DDGS
+import time
 
-# --- CONFIGURAÇÕES ---
-NOME = "Marius Analista"
+# --- CONFIGURAÇÕES VISUAIS (GEMINI STYLE) ---
+st.set_page_config(page_title="Marius Gemini", page_icon="✨", layout="wide")
 
-st.set_page_config(page_title=NOME, page_icon="🧐", layout="wide")
+# CSS para imitar a interface limpa do Gemini
+st.markdown("""
+<style>
+    /* Fundo escuro suave */
+    .stApp { background-color: #0E1117; }
+    
+    /* Balões de chat mais arredondados e sem borda forte */
+    .stChatMessage {
+        border-radius: 20px;
+        border: 1px solid #303030;
+    }
+    
+    /* Remove o padding excessivo do topo */
+    .block-container { padding-top: 2rem; }
+    
+    /* Estiliza o input de texto */
+    .stChatInput textarea {
+        border-radius: 20px;
+        border: 1px solid #444;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+NOME = "Marius"
 
 # --- SEGURANÇA ---
 try:
@@ -21,19 +45,15 @@ model = genai.GenerativeModel('gemini-2.5-flash')
 
 # --- FERRAMENTAS ---
 def ler_pdf(uploaded_file):
-    """Extrai texto de arquivos PDF"""
     try:
         reader = PyPDF2.PdfReader(uploaded_file)
         texto = ""
-        # Lê até 10 páginas (ajuste conforme necessidade)
         for i in range(min(len(reader.pages), 10)):
             texto += reader.pages[i].extract_text() + "\n"
         return texto
-    except Exception as e:
-        return f"Erro ao ler PDF: {e}"
+    except: return ""
 
 def pesquisar_web(termo):
-    """Busca informações na internet (DuckDuckGo)"""
     res = ""
     try:
         with DDGS() as ddgs:
@@ -43,79 +63,66 @@ def pesquisar_web(termo):
     return res
 
 # --- INTERFACE ---
-st.title(f"🧐 {NOME}")
-st.caption("Especialista em Análise: Texto • Imagem • PDF • Web")
+st.title(f"✨ {NOME}")
+st.caption("Powered by Gemini 2.5 Flash")
 
 if "messages" not in st.session_state:
-    st.session_state["messages"] = [{"role": "assistant", "content": "Olá. Envie imagens ou PDFs na barra lateral e vamos analisar."}]
+    st.session_state["messages"] = [{"role": "assistant", "content": "Olá. Pode anexar imagens ou PDFs na barra lateral."}]
 
-# --- BARRA LATERAL (INPUTS) ---
+# --- BARRA LATERAL (ARQUIVOS) ---
 with st.sidebar:
     st.header("📂 Arquivos")
-    
-    # 1. Upload Imagem
-    img_file = st.file_uploader("📸 Analisar Imagem", type=["jpg", "png", "jpeg"])
-    if img_file:
-        st.image(img_file, caption="Imagem carregada", use_container_width=True)
+    img_file = st.file_uploader("📸 Imagem", type=["jpg", "png", "jpeg"])
+    if img_file: st.image(img_file, use_container_width=True)
     
     st.markdown("---")
-    
-    # 2. Upload PDF
-    pdf_file = st.file_uploader("📄 Analisar PDF", type=["pdf"])
-    if pdf_file:
-        st.info(f"PDF '{pdf_file.name}' pronto para leitura.")
+    pdf_file = st.file_uploader("📄 PDF", type=["pdf"])
+    if pdf_file: st.info("PDF Carregado")
 
-# --- CHAT ---
-# Mostra histórico
+# --- HISTÓRICO ---
 for msg in st.session_state.messages:
-    avatar = "👤" if msg["role"] == "user" else "🤖"
+    avatar = "👤" if msg["role"] == "user" else "✨"
     st.chat_message(msg["role"], avatar=avatar).write(msg["content"])
 
-# Input de Texto
-prompt = st.chat_input("Digite sua mensagem aqui...")
+# --- INPUT E LÓGICA DE STREAMING ---
+prompt = st.chat_input("Pergunte ao Marius...")
 
 if prompt:
-    # Mostra mensagem do usuário
+    # 1. Mostra pergunta do usuário
     st.session_state.messages.append({"role": "user", "content": prompt})
     st.chat_message("user", avatar="👤").write(prompt)
 
-    with st.chat_message("assistant", avatar="🤖"):
-        placeholder = st.empty() # Espaço para o texto aparecer
-        placeholder.markdown("🧠 *Analisando dados...*")
+    # 2. Prepara o contexto
+    contexto = ""
+    
+    # Busca Web Automática (Se necessário)
+    if any(x in prompt.lower() for x in ["pesquise", "quem é", "preço", "notícia"]):
+        with st.status("🔍 Pesquisando na web...", expanded=False) as status:
+            web_data = pesquisar_web(prompt)
+            contexto += f"\n[WEB DATA]: {web_data}\n"
+            status.update(label="Pesquisa concluída!", state="complete")
+    
+    if pdf_file:
+        contexto += f"\n[PDF]: {ler_pdf(pdf_file)}\n"
 
+    prompt_final = contexto + prompt
+
+    # 3. RESPOSTA COM STREAMING (O SEGREDO DA VELOCIDADE)
+    with st.chat_message("assistant", avatar="✨"):
         try:
-            # CONSTRUÇÃO DO CONTEXTO
-            contexto = ""
-            
-            # 1. Se tiver PDF, lê e adiciona ao contexto
-            if pdf_file:
-                conteudo_pdf = ler_pdf(pdf_file)
-                contexto += f"\n--- CONTEÚDO DO PDF ANEXADO ---\n{conteudo_pdf}\n-------------------------------\n"
-
-            # 2. Se o usuário pedir pesquisa web (gatilhos)
-            if any(x in prompt.lower() for x in ["pesquise", "busque", "quem é", "atual", "notícia"]):
-                dados_web = pesquisar_web(prompt)
-                contexto += f"\n--- DADOS DA WEB (FONTE EXTERNA) ---\n{dados_web}\n------------------------------------\n"
-
-            prompt_final = contexto + "PERGUNTA DO USUÁRIO: " + prompt
-
-            # ENVIO PARA A IA
-            response = None
-            
-            # Cenário A: Texto + Imagem
+            # stream=True faz o Google mandar pedacinhos da resposta
             if img_file:
-                img_pil = Image.open(img_file)
-                response = model.generate_content([prompt_final, img_pil])
-            
-            # Cenário B: Apenas Texto (com ou sem PDF/Web)
+                img = Image.open(img_file)
+                response = model.generate_content([prompt_final, img], stream=True)
             else:
-                response = model.generate_content(prompt_final)
+                response = model.generate_content(prompt_final, stream=True)
             
-            texto_resp = response.text
+            # st.write_stream cria o efeito de digitação automática
+            full_response = st.write_stream(response)
             
-            # Exibe e Salva
-            placeholder.markdown(texto_resp)
-            st.session_state.messages.append({"role": "assistant", "content": texto_resp})
-
+            # Salva no histórico
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
+            
         except Exception as e:
-            placeholder.error(f"Erro: {e}")
+            st.error(f"Erro: {e}")
+
