@@ -3,31 +3,15 @@ import google.generativeai as genai
 from PIL import Image
 import PyPDF2
 from duckduckgo_search import DDGS
-import time
 
 # --- CONFIGURAÇÕES VISUAIS (GEMINI STYLE) ---
 st.set_page_config(page_title="Marius Gemini", page_icon="✨", layout="wide")
 
-# CSS para imitar a interface limpa do Gemini
 st.markdown("""
 <style>
-    /* Fundo escuro suave */
     .stApp { background-color: #0E1117; }
-    
-    /* Balões de chat mais arredondados e sem borda forte */
-    .stChatMessage {
-        border-radius: 20px;
-        border: 1px solid #303030;
-    }
-    
-    /* Remove o padding excessivo do topo */
-    .block-container { padding-top: 2rem; }
-    
-    /* Estiliza o input de texto */
-    .stChatInput textarea {
-        border-radius: 20px;
-        border: 1px solid #444;
-    }
+    .stChatMessage { border-radius: 20px; border: 1px solid #303030; }
+    .stChatInput textarea { border-radius: 20px; border: 1px solid #444; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -42,6 +26,19 @@ except:
 
 genai.configure(api_key=MINHA_CHAVE)
 model = genai.GenerativeModel('gemini-2.5-flash')
+
+# --- FUNÇÃO CORRETORA (FIX DO JSON) ---
+def stream_parser(response):
+    """
+    Filtra a resposta bruta do Google para pegar apenas o texto.
+    Isso evita que apareça aquele JSON gigante na tela.
+    """
+    for chunk in response:
+        try:
+            if chunk.text:
+                yield chunk.text
+        except:
+            pass
 
 # --- FERRAMENTAS ---
 def ler_pdf(uploaded_file):
@@ -67,14 +64,13 @@ st.title(f"✨ {NOME}")
 st.caption("Powered by Gemini 2.5 Flash")
 
 if "messages" not in st.session_state:
-    st.session_state["messages"] = [{"role": "assistant", "content": "Olá. Pode anexar imagens ou PDFs na barra lateral."}]
+    st.session_state["messages"] = [{"role": "assistant", "content": "Olá. Estou pronto."}]
 
-# --- BARRA LATERAL (ARQUIVOS) ---
+# --- BARRA LATERAL ---
 with st.sidebar:
     st.header("📂 Arquivos")
     img_file = st.file_uploader("📸 Imagem", type=["jpg", "png", "jpeg"])
     if img_file: st.image(img_file, use_container_width=True)
-    
     st.markdown("---")
     pdf_file = st.file_uploader("📄 PDF", type=["pdf"])
     if pdf_file: st.info("PDF Carregado")
@@ -84,20 +80,17 @@ for msg in st.session_state.messages:
     avatar = "👤" if msg["role"] == "user" else "✨"
     st.chat_message(msg["role"], avatar=avatar).write(msg["content"])
 
-# --- INPUT E LÓGICA DE STREAMING ---
+# --- INPUT E LÓGICA ---
 prompt = st.chat_input("Pergunte ao Marius...")
 
 if prompt:
-    # 1. Mostra pergunta do usuário
     st.session_state.messages.append({"role": "user", "content": prompt})
     st.chat_message("user", avatar="👤").write(prompt)
 
-    # 2. Prepara o contexto
+    # Prepara contexto
     contexto = ""
-    
-    # Busca Web Automática (Se necessário)
     if any(x in prompt.lower() for x in ["pesquise", "quem é", "preço", "notícia"]):
-        with st.status("🔍 Pesquisando na web...", expanded=False) as status:
+        with st.status("🔍 Pesquisando...", expanded=False) as status:
             web_data = pesquisar_web(prompt)
             contexto += f"\n[WEB DATA]: {web_data}\n"
             status.update(label="Pesquisa concluída!", state="complete")
@@ -107,22 +100,21 @@ if prompt:
 
     prompt_final = contexto + prompt
 
-    # 3. RESPOSTA COM STREAMING (O SEGREDO DA VELOCIDADE)
+    # --- RESPOSTA STREAMING CORRIGIDA ---
     with st.chat_message("assistant", avatar="✨"):
         try:
-            # stream=True faz o Google mandar pedacinhos da resposta
+            # Pede pro Google mandar stream
             if img_file:
                 img = Image.open(img_file)
                 response = model.generate_content([prompt_final, img], stream=True)
             else:
                 response = model.generate_content(prompt_final, stream=True)
             
-            # st.write_stream cria o efeito de digitação automática
-            full_response = st.write_stream(response)
+            # AQUI ESTÁ A CORREÇÃO:
+            # Passamos a resposta pela função 'stream_parser' antes de exibir
+            full_response = st.write_stream(stream_parser(response))
             
-            # Salva no histórico
             st.session_state.messages.append({"role": "assistant", "content": full_response})
             
         except Exception as e:
             st.error(f"Erro: {e}")
-
