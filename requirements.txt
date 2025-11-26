@@ -1,5 +1,12 @@
 streamlit
 google-generativeai
-
 Pillow
 streamlit-mic-recorder
+streamlit
+google-generativeai
+Pillow
+edge-tts
+asyncio
+PyPDF2
+duckduckgo-search
+
